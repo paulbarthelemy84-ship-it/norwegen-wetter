@@ -50,6 +50,43 @@ function windowBounds(stop) {
   return { start, end };
 }
 
+function addDays(dateStr, delta) {
+  const d = new Date(`${dateStr}T12:00:00`);
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+function fmtDayMonth(dateStr) {
+  const [, m, d] = dateStr.split('-');
+  return `${d}.${m}`;
+}
+
+// Icons früh/mittag/abend für ein beliebiges Datum am Stopp-Ort (für den 5-Tage-Streifen)
+function dayIcons(loc, dateStr) {
+  const { time, weathercode } = loc.hourly;
+  const dayStartIdx = time.indexOf(`${dateStr}T00:00`);
+  const iconAt = (hhmm) => {
+    let idx = time.indexOf(`${dateStr}T${hhmm}`);
+    if (idx === -1) idx = dayStartIdx;
+    return idx === -1 ? null : weatherIcon(weathercode[idx]);
+  };
+  return { morning: iconAt('08:00'), midday: iconAt('13:00'), evening: iconAt('19:00') };
+}
+
+// Tageszusammenfassung (Icons + Tiefst-/Höchstwert) für ein beliebiges Datum am Stopp-Ort
+function daySummary(loc, dateStr) {
+  const { time, temperature_2m } = loc.hourly;
+  const dayStartIdx = time.indexOf(`${dateStr}T00:00`);
+  const dayEndIdx = time.indexOf(`${dateStr}T23:00`);
+  if (dayStartIdx === -1 || dayEndIdx === -1) return null;
+  const temps = temperature_2m.slice(dayStartIdx, dayEndIdx + 1);
+  return {
+    tempMin: Math.min(...temps),
+    tempMax: Math.max(...temps),
+    icons: dayIcons(loc, dateStr),
+  };
+}
+
 function sliceForStop(loc, stop) {
   const { time, temperature_2m, precipitation, precipitation_probability, wind_speed_10m, weathercode } = loc.hourly;
   const { start, end } = windowBounds(stop);
@@ -110,11 +147,13 @@ async function fetchWeather() {
   const lat = locs.map((l) => l.lat).join(',');
   const lon = locs.map((l) => l.lon).join(',');
   // forecast_days=16 = das Maximum, das Open-Meteo anbietet; die API deckt damit
-  // automatisch "heute bis heute+15" ab. Stopps außerhalb dieses Fensters bleiben
-  // ohne Daten und werden im UI als Platzhalter angezeigt (siehe buildStopView).
+  // automatisch "heute bis heute+15" ab. past_days=2 sorgt dafür, dass der
+  // 5-Tage-Streifen in der Detailansicht auch 2 Tage vor einem frühen Stopp
+  // noch Daten hat. Stopps/Tage außerhalb dieses Fensters bleiben ohne Daten
+  // und werden im UI als Platzhalter angezeigt (siehe buildStopView/dayStripHtml).
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m,weathercode` +
-    `&forecast_days=16&timezone=Europe%2FOslo`;
+    `&forecast_days=16&past_days=2&timezone=Europe%2FOslo`;
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Open-Meteo Fehler: ${res.status}`);
@@ -171,8 +210,10 @@ const detailTitle = document.getElementById('detail-title');
 const closeBtn = document.getElementById('close-detail');
 
 let currentViews = [];
+let currentData = null;
 
 function render(data) {
+  currentData = data;
   currentViews = STOPS.map((stop) => buildStopView(stop, data));
   listEl.innerHTML = currentViews.map(cardHtml).join('');
   listEl.querySelectorAll('.stop-card').forEach((card) => {
@@ -224,16 +265,44 @@ function cardHtml(view) {
     </div>`;
 }
 
+// 5-Tage-Streifen (2 Tage vorher, Stopp-Tag, 2 Tage danach) am selben Ort —
+// zeigt, ob/wie sich die Vorhersage rund um den Stopp-Tag verschiebt.
+function dayStripHtml(stop, loc) {
+  const cells = [-2, -1, 0, 1, 2].map((off) => {
+    const dateStr = addDays(stop.date, off);
+    const summary = loc ? daySummary(loc, dateStr) : null;
+    const cls = `day-cell${off === 0 ? ' actual' : ''}`;
+    if (!summary) {
+      return `
+        <div class="${cls}">
+          <span class="day-cell-icons">–</span>
+          <span class="day-cell-temp">&nbsp;</span>
+          <span class="day-cell-date">${fmtDayMonth(dateStr)}</span>
+        </div>`;
+    }
+    return `
+      <div class="${cls}">
+        <span class="day-cell-icons">${summary.icons.morning}${summary.icons.midday}${summary.icons.evening}</span>
+        <span class="day-cell-temp">${Math.round(summary.tempMin)}°–${Math.round(summary.tempMax)}°</span>
+        <span class="day-cell-date">${fmtDayMonth(dateStr)}</span>
+      </div>`;
+  }).join('');
+  return `<div class="day-strip">${cells}</div>`;
+}
+
 function openDetail(id) {
   const view = currentViews.find((v) => v.stop.id === id);
   if (!view || view.unavailable) return;
   const { stop, agg } = view;
+  const key = `${stop.lat},${stop.lon}`;
+  const loc = currentData && currentData.byKey ? currentData.byKey[key] : null;
   detailTitle.textContent = `${stop.name}${stop.sub ? ` · ${stop.sub}` : ''} — ${fmtDate(stop.date)}`;
   detailBody.innerHTML = [
-    chartBlock('Temperatur (°C)', agg.day.time, agg.day.temp, agg.windowRange, 'line', '#d9713f'),
-    chartBlock('Niederschlag (mm)', agg.day.time, agg.day.precip, agg.windowRange, 'bar', '#3f8f8a'),
-    chartBlock('Regenwahrscheinlichkeit (%)', agg.day.time, agg.day.prob, agg.windowRange, 'bar', '#0c3b52'),
-    chartBlock('Wind (km/h)', agg.day.time, agg.day.wind, agg.windowRange, 'line', '#6b7a80'),
+    dayStripHtml(stop, loc),
+    chartBlock('Temperatur (°C)', agg.day.time, agg.day.temp, agg.windowRange, 'line', '#d9713f', (v) => `${Math.round(v)}°`),
+    chartBlock('Niederschlag (mm)', agg.day.time, agg.day.precip, agg.windowRange, 'bar', '#3f8f8a', (v) => v.toFixed(1)),
+    chartBlock('Regenwahrscheinlichkeit (%)', agg.day.time, agg.day.prob, agg.windowRange, 'bar', '#0c3b52', (v) => `${Math.round(v)}%`),
+    chartBlock('Wind (km/h)', agg.day.time, agg.day.wind, agg.windowRange, 'line', '#6b7a80', (v) => `${Math.round(v)}`),
   ].join('');
   detailOverlay.classList.add('open');
 }
@@ -250,8 +319,8 @@ detailOverlay.addEventListener('click', (e) => {
 // ---------------------------------------------------------------------------
 // Mini-SVG-Diagramme (kein externes Chart-Framework)
 // ---------------------------------------------------------------------------
-function chartBlock(label, times, values, windowRange, kind, color) {
-  const W = 320, H = 90, padL = 4, padR = 4, padT = 8, padB = 18;
+function chartBlock(label, times, values, windowRange, kind, color, fmtValue) {
+  const W = 320, H = 122, padL = 4, padR = 4, padT = 20, padB = 18;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
   const n = values.length;
@@ -282,19 +351,27 @@ function chartBlock(label, times, values, windowRange, kind, color) {
     }).join('');
   }
 
-  const labels = [0, 6, 12, 18].map((h) => {
+  // Stunden-Ticks samt Wert direkt am Graph, damit die Kurve ohne Raten lesbar ist
+  const tickHours = [0, 3, 6, 9, 12, 15, 18, 21];
+  const ticks = tickHours.map((h) => {
     const idx = times.findIndex((t) => t.endsWith(`T${String(h).padStart(2, '0')}:00`));
     if (idx === -1) return '';
-    return `<text x="${x(idx)}" y="${H - 4}" font-size="8" fill="#6b7a80" text-anchor="middle">${h}h</text>`;
+    const vx = x(idx);
+    const valueY = Math.max(padT - 6, y(values[idx]) - 6);
+    return `
+      <text x="${vx}" y="${valueY}" font-size="8" fill="${color}" text-anchor="middle" font-weight="700">${fmtValue(values[idx])}</text>
+      <text x="${vx}" y="${H - 4}" font-size="7" fill="#6b7a80" text-anchor="middle">${h}h</text>`;
   }).join('');
+
+  const rangeCaption = `${fmtValue(Math.min(...values))}–${fmtValue(Math.max(...values))}`;
 
   return `
     <div class="chart">
-      <div class="chart-label">${label}</div>
+      <div class="chart-label">${label} <span class="chart-range">${rangeCaption}</span></div>
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}">
         ${windowRect}
         ${shape}
-        ${labels}
+        ${ticks}
       </svg>
     </div>`;
 }

@@ -126,8 +126,31 @@ body {
   flex-shrink: 0;
 }
 
+.day-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.day-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 2px;
+  border-radius: 8px;
+  background: var(--cream);
+}
+.day-cell.actual { background: var(--navy); }
+.day-cell-icons { font-size: .95em; letter-spacing: -1px; }
+.day-cell-temp { font-size: .74em; font-weight: 700; color: var(--navy); }
+.day-cell.actual .day-cell-temp { color: #fff; }
+.day-cell-date { font-size: .68em; color: var(--muted); }
+.day-cell.actual .day-cell-date { color: var(--aqua); }
+
 .chart { margin-top: 16px; }
 .chart-label { font-size: .82em; font-weight: 600; color: var(--navy); margin-bottom: 4px; }
+.chart-range { font-weight: 400; color: var(--muted); font-size: .92em; }
 .chart svg { display: block; background: var(--cream); border-radius: 8px; }
 
 @media (min-width: 640px) {
