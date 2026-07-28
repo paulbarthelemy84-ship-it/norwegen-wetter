@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Norwegen Wetter</title>
+<meta name="theme-color" content="#0c3b52">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>🚢 Norwegen Wetter</h1>
+    <p class="subtitle">AIDAprima · 02.–13.08.2026</p>
+  </header>
+
+  <main class="wrap">
+    <div id="stop-list" class="stop-list"></div>
+    <div class="footer-row">
+      <span id="cache-stamp" class="cache-stamp"></span>
+      <button id="refresh-btn" class="refresh-btn">↻ Aktualisieren</button>
+    </div>
+  </main>
+
+  <div id="detail-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <h2 id="detail-title"></h2>
+        <button id="close-detail" class="close-btn" aria-label="Schließen">✕</button>
+      </div>
+      <div id="detail-body" class="overlay-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
